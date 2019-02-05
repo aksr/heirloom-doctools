@@ -188,6 +188,7 @@ static const struct {
 	{ "psbb",		(void(*)(int))casepsbb },
 	{ "pshape",		(void(*)(int))casepshape },
 	{ "pso",		(void(*)(int))casepso },
+	{ "spawn",		(void(*)(int))casespawn },
 	{ "rchar",		(void(*)(int))caserchar },
 	{ "recursionlimit",	(void(*)(int))caserecursionlimit },
 	{ "return",		(void(*)(int))casereturn },

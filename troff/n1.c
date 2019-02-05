@@ -234,9 +234,9 @@ main(int argc, char **argv)
 					argv[0][1] == 'd' ? "ds" : "nr",
 					argv[0][2],
 					argv[0][1] == 'd' ? "\"" : "",
-					&argv[0][3]); 
+					&argv[0][3]);
 			}
-			} else 
+			} else
 				errprint("wrong options");
 			continue;
 		case 'c':
@@ -261,7 +261,7 @@ main(int argc, char **argv)
 			  else {
 				errprint("Cannot find library %s\n", argv[0]);
 				done(02);
-			  } 
+			  }
 			continue;
 		case 'o':
 			getpn(&argv[0][2]);
@@ -438,7 +438,7 @@ tryfile(register const char *pat, register char *fn, int idx)
 	if (access(mfiles[idx], 4) == -1)
 		return(0);
 	else return(1);
-}	
+}
 
 void catch(int unused __unused)
 {
@@ -483,7 +483,7 @@ init2(void)
 	ttyod = 2;
 	if ((ttyp=ttyname(j=0)) != 0 || (ttyp=ttyname(j=1)) != 0 || (ttyp=ttyname(j=2)) != 0)
 		;
-	else 
+	else
 		ttyp = "notty";
 	iflg = j;
 	if (ascii)
@@ -968,12 +968,12 @@ g0:
 			return(k);
 		}
 		if (k == FLSS) {
-			copyf++; 
+			copyf++;
 			raw++;
 			i = getch0();
 			if (!fi)
 				flss = i;
-			copyf--; 
+			copyf--;
 			raw--;
 			goto g0;
 		}
@@ -988,7 +988,7 @@ g0:
 			}
 			if (k == fc || k == tabch || k == ldrch) {
 				if ((i = setfield(k)) == 0)
-					goto g0; 
+					goto g0;
 				else
 					return(i);
 			}
@@ -1129,6 +1129,9 @@ ge:
 		if (xflag == 0)
 			break;
 		_setenv();
+		goto g0;
+	case '>':	/* interact with subprocess */
+		spawninteract();
 		goto g0;
 	case '.':	/* . */
 		i = '.';
@@ -1401,6 +1404,162 @@ setyon(void)	/* \Y(xx for indirect copy through */
 	return mkxfunc(YON, 0);
 }
 
+
+#define PIPE_READ 0
+#define PIPE_WRITE 1
+static int spwPid = -1;
+static int spwIn = 0;
+static int spwOut = 0;
+void
+casespawn(void)
+{
+
+	if (skip(1)) {
+		if (spwPid != -1) {		/* terminate */
+			close(spwIn);
+			close(spwOut);
+			spwIn = spwOut = 0;
+			spwPid = -1;
+			return;
+		}
+		errprint("spawn: expected command");
+		done(02);
+	}
+
+	if (spwPid != -1) {
+		errprint("spawn: subprocess already started");
+		done(02);
+	}
+
+	/* read the command string */
+	int	c, i, k;
+	lgf++;
+	nextf[0] = 0;
+	for (k = 0; ; k++) {
+		if ((c = cbits(i = getch())) == '\n' || c == 0)
+			break;
+		if (k + 1 >= NS)
+			nextf = realloc(nextf, NS += 14);
+		nextf[k] = c & BYTEMASK;
+	}
+	nextf[k] = 0;
+
+	/* start the subprocess */
+	int aStdinPipe[2];
+	int aStdoutPipe[2];
+
+	if (pipe(aStdinPipe) < 0) {
+		errprint("spawn: allocating pipe for child input redirect");
+		done(02);
+	}
+	if (pipe(aStdoutPipe) < 0) {
+		close(aStdinPipe[PIPE_READ]);
+		close(aStdinPipe[PIPE_WRITE]);
+		errprint("spawn: allocating pipe for child output redirect");
+		done(02);
+	}
+
+	spwPid = fork();
+	if (0 == spwPid) {
+		// child continues here
+		// redirect stdin
+		if (dup2(aStdinPipe[PIPE_READ], STDIN_FILENO) == -1) {
+			_exit(0177);
+		}
+		// redirect stdout
+		if (dup2(aStdoutPipe[PIPE_WRITE], STDOUT_FILENO) == -1) {
+			_exit(0177);
+		}
+		// redirect stderr
+		/*
+		if (dup2(aStdoutPipe[PIPE_WRITE], STDERR_FILENO) == -1) {
+			_exit(0177)
+		}
+		*/
+		// all these are for use by parent only
+		close(aStdinPipe[PIPE_READ]);
+		close(aStdinPipe[PIPE_WRITE]);
+		close(aStdoutPipe[PIPE_READ]);
+		close(aStdoutPipe[PIPE_WRITE]);
+		errprint("spawn: subprocess starting");
+		execl(SHELL, "sh", "-c", nextf, NULL);
+		_exit(0177);
+		/*NOTREACHED*/
+	} else if (spwPid > 0) {
+		// parent continues here
+		// close unused file descriptors, these are for child only
+		close(aStdinPipe[PIPE_READ]);
+		close(aStdoutPipe[PIPE_WRITE]);
+		spwIn = aStdinPipe[PIPE_WRITE];
+		spwOut = aStdoutPipe[PIPE_READ];
+	} else {
+		// failed to create child
+		close(aStdinPipe[PIPE_READ]);
+		close(aStdinPipe[PIPE_WRITE]);
+		close(aStdoutPipe[PIPE_READ]);
+		close(aStdoutPipe[PIPE_WRITE]);
+		errprint("spawn: failed to create child");
+		done(02);
+	}
+}
+
+void
+spawninteract(void)	/* interact with subprocess */
+{
+	if (spwPid == -1) {
+		errprint("spawn: subprocess not running");
+		done(02);
+	}
+
+	/* send data to subprocess */
+	char  tbuf[8];
+	tchar tch, delim;
+	int chi;
+
+	if (ismot(tch = getch()))
+		return;
+	delim = tch;
+	lgf++;
+	copyf++;
+	while (chi = cbits(tch = getch()), !issame(tch, delim) && chi != '\n') {
+		if (write(spwIn, tbuf, wctomb(tbuf, chi)) <= 0) {
+			errprint("spawn: error writing to subprocess");
+			done(02);
+		}
+	}
+	if (!issame(tch, delim))
+		nodelim(delim);
+	copyf--;
+	lgf--;
+	write(spwIn, "\n", 1);
+
+	/* read results from subprocess */
+	tchar xbuf[NC];
+	register tchar *xi = xbuf;
+	wchar_t wc;
+	char ch;
+
+	wc = 0;
+	mbtowc(NULL, 0, 0);
+	while (xi < xbuf+NC-1) {
+		if (read(spwOut, &ch, 1) != 1) {
+			errprint("spawn: error reading from subprocess");
+			done(02);
+		}
+		if (mbtowc(&wc, &ch, 1) != 1)
+			continue;
+		if (wc == '\n')
+			break;
+		tch = wc;
+		if (tch >= 0x80)
+			tch |= COPYBIT;
+		*xi = tch;
+		xi++;
+		tch = 0;
+	}
+	*xi = 0;
+	pushback(xbuf);
+}
 
 char	ifilt[32] = {
 	0, 001, 002, 003, 0, 005, 006, 007, 010, 011, 012};
